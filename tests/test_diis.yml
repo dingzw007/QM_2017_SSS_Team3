@@ -1,25 +1,21 @@
-nel:
-    ""
-nbas:
-    ""
 conv:
      5
 opt:
-     "None"
+     "DIIS"
 max_nbf:
      120
 guess:
      "Core"
 max_iter:
-     100
+     120
 charge:
-     0
+    0
 
 basis:
-    "cc-pvdz"
+    "aug-cc-pVDZ"
 
 geometry:
-|
+|   
     O
     H 1 1.1
     H 1 1.1 2 104

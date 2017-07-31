@@ -3,7 +3,11 @@ The Hartree-Fock driver.
 Performs a Hartree-Fock calculation on a given molecule.
 """
 import numpy as np
+import os, sys
+sys.path.append(os.path.dirname(__file__))
 from scf_utils import *
+sys.path.pop()
+from collections import deque
 
 
 def scf(ao_int, scf_params):
@@ -35,16 +39,6 @@ def scf(ao_int, scf_params):
         - max_iter[int] max # of SCF iterations
                         CHECK: positive integers
     """
-    # unpack ao_int
-    T = ao_int['T']
-    V = ao_int['V']
-    g = ao_int['g']
-    S = ao_int['S']
-    A = ao_int['A']
-
-    # build Hcore (T and V are not needed in scf)
-    H = T + V
-
     # unpack scf_params
     nel = scf_params['nel']
     nbas = scf_params['nbas']
@@ -53,27 +47,54 @@ def scf(ao_int, scf_params):
     max_nbf = scf_params['max_nbf']
     guess = scf_params['guess']
     max_iter = scf_params['max_iter']
+    is_fitted = scf_params['is_fitted']
+    
+    # unpack ao_int
+    T = ao_int['T']
+    V = ao_int['V']
+    g = ao_int['g3'] if is_fitted else ao_int['g4']
+    S = ao_int['S']
+    A = ao_int['A']
+    F = None
+
+    # build Hcore (T and V are not needed in scf)
+    H = T + V
 
     # initial guess (case insensitive)
+    err = None
     if guess.upper() == "CORE":
         eps, C = diag(H, A)
         D = get_dm(C, nel)
+        F = get_fock(H, g, D, 'NONE', [], [])
     else:
         raise Exception("Currently only core guess is supported!")
+
+    # initialize storage of errors and previous Fs if we're doing DIIS
+    max_prev_count = 1
+    if(opt.upper() == 'DIIS'):
+        max_prev_count = 10
+    F_prev_list = deque([], max_prev_count)
+    r_prev_list = deque([], max_prev_count)
 
     # SCF loop
     conv_flag = False
     for iteration in range(1,(max_iter+1)):
-        # get F
-        F = get_fock(H, g, D)
+        # diag and update density matrix
+        eps, C = diag(F, A)
+        D = get_dm(C, nel)
 
+        # get F
+        F = get_fock(H, g, D, 'NONE', F_prev_list, r_prev_list)
 
         # calculate error
-        err = get_SCF_err(S, D, F)
+        err, err_v = get_SCF_err(S, D, F)
 
-        # diag and update density matrix
-        eps, C = diag(F ,A)
-        D = get_dm(C, nel)
+        # update F_prev_list and r_prev_list
+        F_prev_list.append(F)
+        r_prev_list.append(err_v)
+
+        # diis update
+        F = get_fock(H, g, D, opt, F_prev_list, r_prev_list)
 
         # print iteratoin info
         print("iter: {0:2d}, err: {1:0.5E}".format(iteration, err))
@@ -88,7 +109,7 @@ def scf(ao_int, scf_params):
 
     # post process
     if conv_flag:
-        return eps, C, D
+        return eps, C, D, F
     else:
         raise Exception ("  ** SCF fails to converge in %d iterations! **"
                          % max_iter)
